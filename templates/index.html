@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Servo Logger 3ch</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;800&display=swap');
+  :root {
+    --bg:     #0a0e1a;
+    --panel:  #111827;
+    --border: #1e2d45;
+    --accent: #00d4ff;
+    --a2:     #ff6b35;
+    --green:  #00ff88;
+    --red:    #ff3355;
+    --text:   #c8d8f0;
+    --muted:  #4a6080;
+    --c0:     #00d4ff;
+    --c1:     #ff6b35;
+    --c2:     #a78bfa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Exo 2', sans-serif; min-height: 100vh; padding: 16px;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(0,212,255,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(255,107,53,0.04) 0%, transparent 50%);
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    font-size: 1.4rem; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,0.4);
+  }
+  .status-dot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--muted);
+    transition: all 0.3s;
+  }
+  .status-dot.active {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 12px;
+    height: calc(100vh - 90px);
+  }
+
+  /* 左カラム */
+  .left-col { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; position: relative; overflow: hidden;
+  }
+  .panel::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0.4;
+  }
+  .panel-title {
+    font-size: 0.6rem; font-weight: 600; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+  }
+
+  /* チャンネルカード */
+  .ch-card {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px;
+  }
+  .ch-card:last-child { margin-bottom: 0; }
+  .ch-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .ch-badge {
+    width: 24px; height: 24px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; font-weight: 800; letter-spacing: 0.05em;
+  }
+  .ch-badge.c0 { background: rgba(0,212,255,0.15); color: var(--c0); }
+  .ch-badge.c1 { background: rgba(255,107,53,0.15); color: var(--c1); }
+  .ch-badge.c2 { background: rgba(167,139,250,0.15); color: var(--c2); }
+  .ch-label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; flex: 1; }
+  .ch-stats {
+    display: flex; gap: 6px; margin-bottom: 8px;
+  }
+  .mini-stat {
+    flex: 1; background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px;
+  }
+  .mini-stat .lbl { font-size: 0.55rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .mini-stat .val { font-family: 'Share Tech Mono', monospace; font-size: 0.85rem; margin-top: 1px; }
+
+  .ch-controls { display: flex; gap: 6px; align-items: center; }
+
+  .btn-sm {
+    padding: 6px 10px; border-radius: 5px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); font-family: 'Exo 2', sans-serif;
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; cursor: pointer; transition: all 0.2s; white-space: nowrap;
+  }
+  .btn-sm:hover { transform: translateY(-1px); filter: brightness(1.3); }
+  .btn-sm.on  { border-color: var(--green); color: var(--green); }
+  .btn-sm.off { border-color: var(--red);   color: var(--red); }
+  .btn-sm.sweep-on  { border-color: var(--a2); color: var(--a2); }
+
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 3px;
+    background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 6px rgba(0,212,255,0.5); cursor: pointer;
+  }
+  .slider-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .slider-val {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.8rem;
+    color: var(--accent); min-width: 32px; text-align: right;
+  }
+
+  /* 一斉制御 */
+  .all-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .btn-all {
+    padding: 9px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text); font-family: 'Exo 2', sans-serif;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-all:hover { transform: translateY(-1px); filter: brightness(1.2); }
+  .btn-all.green { border-color: var(--green); color: var(--green); }
+  .btn-all.red   { border-color: var(--red);   color: var(--red); }
+  .btn-all.cyan  { border-color: var(--accent); color: var(--accent); }
+  .btn-all.orange{ border-color: var(--a2);    color: var(--a2); }
+  .btn-all.wide  { grid-column: 1 / 3; }
+
+  /* 計測パネル */
+  .measure-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+  /* 周期入力 */
+  .period-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .period-row label { font-size: 0.68rem; color: var(--muted); letter-spacing: 0.08em; }
+  input[type=number].period-input {
+    width: 64px; padding: 5px 8px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+    color: var(--accent); font-family: 'Share Tech Mono', monospace; font-size: 0.85rem;
+    outline: none;
+  }
+
+  /* 右カラム */
+  .right-col { display: flex; flex-direction: column; gap: 12px; }
+  .chart-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .chart-wrap  { flex: 1; position: relative; min-height: 0; }
+  .log-panel   { height: 120px; display: flex; flex-direction: column; }
+  .log-body {
+    flex: 1; overflow-y: auto; font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem; color: var(--muted); line-height: 1.5;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .log-line.comment { color: var(--accent); opacity: 0.7; }
+
+  .meas-indicator {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.65rem; color: var(--green); letter-spacing: 0.1em;
+    text-transform: uppercase; opacity: 0; transition: opacity 0.3s; margin-left: auto;
+  }
+  .meas-indicator.active { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="connDot"></div>
+  <h1>Servo Logger 3ch</h1>
+  <span class="meas-indicator" id="measInd">
+    <span class="status-dot active"></span> REC
+  </span>
+</header>
+
+<div class="layout">
+
+  <!-- 左: コントロール -->
+  <div class="left-col">
+
+    <!-- チャンネル個別 -->
+    <div class="panel">
+      <div class="panel-title">Servo Channels</div>
+
+      <!-- CH0 -->
+      <div class="ch-card">
+        <div class="ch-header">
+          <div class="ch-badge c0">CH0</div>
+          <span class="ch-label" style="color:var(--c0);">PCA ch0 / D6</span>
+        </div>
+        <div class="ch-stats">
+          <div class="mini-stat">
+            <div class="lbl">Pulse</div>
+            <div class="val" id="pulse0" style="color:var(--c0);">—</div>
+          </div>
+          <div class="mini-stat">
+            <div class="lbl">Angle</div>
+            <div class="val" id="angle0" style="color:var(--c0);">—</div>
+          </div>
+        </div>
+        <div class="ch-controls">
+          <button class="btn-sm" id="srvBtn0" onclick="toggleServo(0)">SRV OFF</button>
+          <button class="btn-sm" id="swpBtn0" onclick="toggleSweep(0)">SWEEP</button>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="slider0" min="0" max="180" value="90"
+            oninput="onSlider(0,this.value)" onchange="sendAngle(0,this.value)">
+          <span class="slider-val" id="sliderVal0">90°</span>
+        </div>
+      </div>
+
+      <!-- CH1 -->
+      <div class="ch-card">
+        <div class="ch-header">
+          <div class="ch-badge c1">CH1</div>
+          <span class="ch-label" style="color:var(--c1);">PCA ch1 / D5</span>
+        </div>
+        <div class="ch-stats">
+          <div class="mini-stat">
+            <div class="lbl">Pulse</div>
+            <div class="val" id="pulse1" style="color:var(--c1);">—</div>
+          </div>
+          <div class="mini-stat">
+            <div class="lbl">Angle</div>
+            <div class="val" id="angle1" style="color:var(--c1);">—</div>
+          </div>
+        </div>
+        <div class="ch-controls">
+          <button class="btn-sm" id="srvBtn1" onclick="toggleServo(1)">SRV OFF</button>
+          <button class="btn-sm" id="swpBtn1" onclick="toggleSweep(1)">SWEEP</button>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="slider1" min="0" max="180" value="90"
+            oninput="onSlider(1,this.value)" onchange="sendAngle(1,this.value)">
+          <span class="slider-val" id="sliderVal1">90°</span>
+        </div>
+      </div>
+
+      <!-- CH2 -->
+      <div class="ch-card">
+        <div class="ch-header">
+          <div class="ch-badge c2">CH2</div>
+          <span class="ch-label" style="color:var(--c2);">PCA ch2 / D4</span>
+        </div>
+        <div class="ch-stats">
+          <div class="mini-stat">
+            <div class="lbl">Pulse</div>
+            <div class="val" id="pulse2" style="color:var(--c2);">—</div>
+          </div>
+          <div class="mini-stat">
+            <div class="lbl">Angle</div>
+            <div class="val" id="angle2" style="color:var(--c2);">—</div>
+          </div>
+        </div>
+        <div class="ch-controls">
+          <button class="btn-sm" id="srvBtn2" onclick="toggleServo(2)">SRV OFF</button>
+          <button class="btn-sm" id="swpBtn2" onclick="toggleSweep(2)">SWEEP</button>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="slider2" min="0" max="180" value="90"
+            oninput="onSlider(2,this.value)" onchange="sendAngle(2,this.value)">
+          <span class="slider-val" id="sliderVal2">90°</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 一斉制御 -->
+    <div class="panel">
+      <div class="panel-title">All Channels</div>
+      <div class="all-btns">
+        <button class="btn-all green" onclick="apiPost('/api/servo/all/on')
+          .then(()=>setAllServo(true))">ALL SRV ON</button>
+        <button class="btn-all red" onclick="apiPost('/api/servo/all/off')
+          .then(()=>setAllServo(false))">ALL SRV OFF</button>
+
+        <div style="grid-column:1/3;">
+          <div class="period-row">
+            <label>片道</label>
+            <input type="number" class="period-input" id="sweepPeriodAll" value="2" min="1" step="0.5">
+            <label>秒</label>
+          </div>
+        </div>
+        <button class="btn-all orange" onclick="startAllSweep()">ALL SWEEP ON</button>
+        <button class="btn-all red"    onclick="stopAllSweep()">ALL SWEEP OFF</button>
+      </div>
+    </div>
+
+    <!-- 計測 -->
+    <div class="panel">
+      <div class="panel-title">Measurement</div>
+      <div class="measure-row">
+        <button class="btn-all green" onclick="apiPost('/api/measure/start')">▶ START</button>
+        <button class="btn-all orange" onclick="apiPost('/api/measure/stop')">■ STOP</button>
+        <button class="btn-all" style="border-color:var(--muted);color:var(--muted);"
+          onclick="apiPost('/api/measure/reset').then(()=>clearChart())">↺ RESET</button>
+        <button class="btn-all cyan" onclick="window.location.href='/api/download/csv'">⬇ CSV</button>
+        <a class="btn-all wide" style="text-align:center;text-decoration:none;border-color:var(--muted);color:var(--muted);"
+          href="/replay">⏵ REPLAY</a>
+      </div>
+      <div style="margin-top:8px;font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--muted);">
+        Samples: <span id="sampleCount" style="color:var(--accent);">0</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 右: グラフ + ログ -->
+  <div class="right-col">
+    <div class="panel chart-panel">
+      <div class="panel-title">Pulse Width (μs) — 3 Channels Realtime</div>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel log-panel">
+      <div class="panel-title">System Log</div>
+      <div class="log-body" id="logBody"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Socket.IO ────────────────────────────────────────────
+const socket = io();
+let sampleCount = 0;
+const servoOn  = [false, false, false];
+const sweepOn  = [false, false, false];
+
+const CH_COLORS = ['#00d4ff', '#ff6b35', '#a78bfa'];
+const CH_NAMES  = ['CH0', 'CH1', 'CH2'];
+
+socket.on('connect', () => {
+  document.getElementById('connDot').classList.add('active');
+  addLog('# Connected');
+});
+socket.on('disconnect', () => {
+  document.getElementById('connDot').classList.remove('active');
+});
+
+socket.on('data', (d) => {
+  sampleCount++;
+  document.getElementById('sampleCount').textContent = sampleCount;
+  for (let ch = 0; ch < 3; ch++) {
+    document.getElementById(`pulse${ch}`).textContent = d.pulses[ch] + 'μs';
+    document.getElementById(`angle${ch}`).textContent = d.angles[ch] + '°';
+  }
+  addChartPoint(d.t, d.pulses);
+});
+
+socket.on('log', (d) => addLog(d.message));
+
+socket.on('sweep_angle', (d) => {
+  const ch = d.ch;
+  document.getElementById(`slider${ch}`).value    = d.angle;
+  document.getElementById(`sliderVal${ch}`).textContent = Math.round(d.angle) + '°';
+});
+
+// ─── Chart.js ─────────────────────────────────────────────
+const MAX_PTS = 200;
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [0, 1, 2].map(ch => ({
+      label: CH_NAMES[ch],
+      data:  [],
+      borderColor: CH_COLORS[ch],
+      borderWidth: 1.5,
+      pointRadius: 0,
+      fill: false,
+      tension: 0.1,
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    scales: {
+      x: {
+        ticks: { color: '#4a6080', font: { family: 'Share Tech Mono', size: 10 }, maxTicksLimit: 8 },
+        grid:  { color: 'rgba(30,45,69,0.8)' },
+        title: { display: true, text: 'Time (ms)', color: '#4a6080', font: { size: 10 } },
+      },
+      y: {
+        min: 400, max: 2600,
+        ticks: { color: '#4a6080', font: { family: 'Share Tech Mono', size: 10 }, stepSize: 500 },
+        grid:  { color: 'rgba(30,45,69,0.8)' },
+        title: { display: true, text: 'Pulse Width (μs)', color: '#4a6080', font: { size: 10 } },
+      }
+    },
+    plugins: {
+      legend: {
+        display: true,
+        labels: { color: '#c8d8f0', font: { family: 'Share Tech Mono', size: 11 }, boxWidth: 16 }
+      }
+    }
+  }
+});
+
+function addChartPoint(t, pulses) {
+  chart.data.labels.push(t);
+  for (let ch = 0; ch < 3; ch++) {
+    chart.data.datasets[ch].data.push(pulses[ch] > 0 ? pulses[ch] : null);
+  }
+  if (chart.data.labels.length > MAX_PTS) {
+    chart.data.labels.shift();
+    chart.data.datasets.forEach(ds => ds.data.shift());
+  }
+  chart.update('none');
+}
+
+function clearChart() {
+  chart.data.labels = [];
+  chart.data.datasets.forEach(ds => ds.data = []);
+  chart.update();
+  sampleCount = 0;
+  document.getElementById('sampleCount').textContent = '0';
+}
+
+// ─── サーボ制御 ───────────────────────────────────────────
+function toggleServo(ch) {
+  const endpoint = servoOn[ch] ? `/api/servo/${ch}/off` : `/api/servo/${ch}/on`;
+  apiPost(endpoint).then(() => {
+    servoOn[ch] = !servoOn[ch];
+    updateServoBtn(ch);
+  });
+}
+
+function updateServoBtn(ch) {
+  const btn = document.getElementById(`srvBtn${ch}`);
+  if (servoOn[ch]) {
+    btn.textContent = 'SRV ON';
+    btn.className = 'btn-sm on';
+  } else {
+    btn.textContent = 'SRV OFF';
+    btn.className = 'btn-sm';
+  }
+}
+
+function setAllServo(on) {
+  for (let ch = 0; ch < 3; ch++) {
+    servoOn[ch] = on;
+    updateServoBtn(ch);
+  }
+}
+
+function onSlider(ch, val) {
+  document.getElementById(`sliderVal${ch}`).textContent = val + '°';
+}
+
+const angleTimers = [null, null, null];
+function sendAngle(ch, val) {
+  clearTimeout(angleTimers[ch]);
+  angleTimers[ch] = setTimeout(() => {
+    apiPost(`/api/servo/${ch}/angle/${val}`);
+  }, 50);
+}
+
+// ─── スイープ ─────────────────────────────────────────────
+function toggleSweep(ch) {
+  if (sweepOn[ch]) {
+    apiPost(`/api/sweep/${ch}/stop`).then(() => {
+      sweepOn[ch] = false;
+      updateSweepBtn(ch);
+    });
+  } else {
+    const period = parseFloat(document.getElementById('sweepPeriodAll').value) || 2.0;
+    fetch(`/api/sweep/${ch}/start`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({period})
+    }).then(r => r.json()).then(() => {
+      sweepOn[ch] = true;
+      servoOn[ch] = true;
+      updateSweepBtn(ch);
+      updateServoBtn(ch);
+    });
+  }
+}
+
+function updateSweepBtn(ch) {
+  const btn = document.getElementById(`swpBtn${ch}`);
+  if (sweepOn[ch]) {
+    btn.textContent = 'SWEEP ON';
+    btn.className = 'btn-sm sweep-on';
+  } else {
+    btn.textContent = 'SWEEP';
+    btn.className = 'btn-sm';
+  }
+}
+
+function startAllSweep() {
+  const period = parseFloat(document.getElementById('sweepPeriodAll').value) || 2.0;
+  fetch('/api/sweep/all/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({period})
+  }).then(r => r.json()).then(() => {
+    for (let ch = 0; ch < 3; ch++) {
+      sweepOn[ch] = true; servoOn[ch] = true;
+      updateSweepBtn(ch); updateServoBtn(ch);
+    }
+  });
+}
+
+function stopAllSweep() {
+  apiPost('/api/sweep/all/stop').then(() => {
+    for (let ch = 0; ch < 3; ch++) {
+      sweepOn[ch] = false;
+      updateSweepBtn(ch);
+    }
+  });
+}
+
+// ─── 計測インジケーター ───────────────────────────────────
+setInterval(() => {
+  fetch('/api/status').then(r => r.json()).then(d => {
+    document.getElementById('measInd').className =
+      'meas-indicator' + (d.measuring ? ' active' : '');
+  });
+}, 2000);
+
+// ─── API ─────────────────────────────────────────────────
+function apiPost(url) {
+  return fetch(url, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => { addLog(`# ${url}`); return d; })
+    .catch(e => addLog(`# ERROR: ${e}`));
+}
+
+// ─── ログ ─────────────────────────────────────────────────
+function addLog(msg) {
+  const body = document.getElementById('logBody');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (msg.startsWith('#') ? ' comment' : '');
+  const now = new Date().toISOString().slice(11, 23);
+  line.textContent = `[${now}] ${msg}`;
+  body.appendChild(line);
+  if (body.children.length > 80) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Servo Replay</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;800&display=swap');
+
+  :root {
+    --bg:     #0a0e1a;
+    --panel:  #111827;
+    --border: #1e2d45;
+    --accent: #00d4ff;
+    --accent2:#ff6b35;
+    --green:  #00ff88;
+    --red:    #ff3355;
+    --text:   #c8d8f0;
+    --muted:  #4a6080;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Exo 2', sans-serif;
+    min-height: 100vh;
+    padding: 20px;
+    background-image:
+      radial-gradient(ellipse at 10% 20%, rgba(0,212,255,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 90% 80%, rgba(255,107,53,0.04) 0%, transparent 50%);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,212,255,0.4);
+  }
+
+  .back-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Exo 2', sans-serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+  .back-btn:hover { color: var(--text); border-color: var(--text); }
+
+  /* セッション選択 */
+  .session-select-wrap {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  select {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    font-family: 'Exo 2', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn:hover { background: rgba(0,212,255,0.08); }
+  .btn.playing { border-color: var(--accent2); color: var(--accent2); }
+
+  /* メインレイアウト */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 16px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.4;
+  }
+
+  .panel-title {
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* カメラ映像パネル */
+  .camera-panel {
+    aspect-ratio: 4/3;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .camera-wrap {
+    flex: 1;
+    position: relative;
+    background: #000;
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #frameImg {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: none;
+  }
+
+  .no-image {
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.8rem;
+    text-align: center;
+  }
+
+  .frame-info {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  /* グラフパネル */
+  .chart-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chart-wrap {
+    flex: 1;
+    position: relative;
+    min-height: 200px;
+  }
+
+  /* 再生コントロール (下段全幅) */
+  .control-panel {
+    grid-column: 1 / 3;
+  }
+
+  .playback-info {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .stat-card {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+
+  .stat-label {
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .stat-value {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.1rem;
+    color: var(--accent);
+    margin-top: 2px;
+  }
+
+  /* タイムラインスライダー */
+  .timeline-wrap {
+    margin-bottom: 14px;
+  }
+
+  .timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(0,212,255,0.6);
+    cursor: pointer;
+  }
+
+  .control-btns {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .speed-label {
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  select.speed-select {
+    width: auto;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    flex: none;
+  }
+
+  /* グラフ上の現在位置マーカー */
+  .current-time-line {
+    position: absolute;
+    top: 0;
+    width: 1px;
+    height: 100%;
+    background: var(--accent2);
+    pointer-events: none;
+    opacity: 0.8;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="back-btn" href="/">← Back</a>
+  <h1>⏵ Servo Replay</h1>
+</header>
+
+<!-- セッション選択 -->
+<div class="session-select-wrap">
+  <select id="sessionSelect">
+    <option value="">── セッションを選択 ──</option>
+  </select>
+  <button class="btn" onclick="loadSession()">Load</button>
+</div>
+
+<!-- メインコンテンツ -->
+<div class="main-grid" id="mainContent" style="display:none;">
+
+  <!-- 左: カメラ映像 -->
+  <div class="panel camera-panel">
+    <div class="panel-title">Camera Frame</div>
+    <div class="camera-wrap">
+      <img id="frameImg" alt="frame">
+      <div class="no-image" id="noImage">画像なし</div>
+    </div>
+    <div class="frame-info">
+      <span id="frameIndex">Frame: —</span>
+      <span id="frameTime">Time: —</span>
+    </div>
+  </div>
+
+  <!-- 右: パルス幅グラフ -->
+  <div class="panel chart-panel">
+    <div class="panel-title">Pulse Width (μs)</div>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <!-- 下: 再生コントロール -->
+  <div class="panel control-panel">
+    <div class="playback-info">
+      <div class="stat-card">
+        <div class="stat-label">Time</div>
+        <div class="stat-value" id="statTime">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pulse</div>
+        <div class="stat-value" id="statPulse">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Angle Est.</div>
+        <div class="stat-value" id="statAngle">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Frame</div>
+        <div class="stat-value" id="statFrame">—</div>
+      </div>
+    </div>
+
+    <div class="timeline-wrap">
+      <div class="timeline-labels">
+        <span>0ms</span>
+        <span id="totalTimeLabel">—</span>
+      </div>
+      <input type="range" id="timeline" min="0" max="100" value="0"
+             oninput="onTimelineInput(this.value)">
+    </div>
+
+    <div class="control-btns">
+      <button class="btn" id="playBtn" onclick="togglePlay()">▶ Play</button>
+      <button class="btn" onclick="seekTo(0)">⏮ Reset</button>
+      <span class="speed-label">Speed:</span>
+      <select class="speed-select" id="speedSelect">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── データ ───────────────────────────────────────────────
+let pulseData   = [];   // [{timestamp_ms, pulse_us, angle_deg}]
+let frameData   = [];   // [{frame_index, timestamp_ms, filename}]
+let sessionName = '';
+
+let currentMs   = 0;
+let totalMs     = 0;
+let isPlaying   = false;
+let playTimer   = null;
+let chart       = null;
+
+// ─── セッション一覧読み込み ──────────────────────────────
+async function loadSessionList() {
+  const res  = await fetch('/api/sessions');
+  const list = await res.json();
+  const sel  = document.getElementById('sessionSelect');
+  sel.innerHTML = '<option value="">── セッションを選択 ──</option>';
+  list.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = `${s.name}  (${s.frame_count} frames)`;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadSession() {
+  sessionName = document.getElementById('sessionSelect').value;
+  if (!sessionName) return;
+
+  // データ読み込み
+  const [dataRes, frameRes] = await Promise.all([
+    fetch(`/api/session/${sessionName}/data`),
+    fetch(`/api/session/${sessionName}/frames`),
+  ]);
+  pulseData = await dataRes.json();
+  frameData = await frameRes.json();
+
+  if (!pulseData.length) {
+    alert('データがありません');
+    return;
+  }
+
+  totalMs = pulseData[pulseData.length - 1].timestamp_ms;
+  document.getElementById('totalTimeLabel').textContent = totalMs + 'ms';
+  document.getElementById('timeline').max = totalMs;
+
+  document.getElementById('mainContent').style.display = 'grid';
+  initChart();
+  seekTo(0);
+}
+
+// ─── Chart.js ─────────────────────────────────────────────
+function initChart() {
+  if (chart) chart.destroy();
+  const ctx = document.getElementById('chart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels:   pulseData.map(d => d.timestamp_ms),
+      datasets: [{
+        label: 'Pulse (μs)',
+        data:  pulseData.map(d => d.pulse_us),
+        borderColor: '#00d4ff',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: true,
+        backgroundColor: 'rgba(0,212,255,0.05)',
+        tension: 0.1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: {
+          ticks: { color: '#4a6080', font: { family: 'Share Tech Mono', size: 10 }, maxTicksLimit: 8 },
+          grid:  { color: 'rgba(30,45,69,0.8)' },
+          title: { display: true, text: 'Time (ms)', color: '#4a6080', font: { size: 10 } },
+        },
+        y: {
+          min: 400, max: 2600,
+          ticks: { color: '#4a6080', font: { family: 'Share Tech Mono', size: 10 }, stepSize: 500 },
+          grid:  { color: 'rgba(30,45,69,0.8)' },
+          title: { display: true, text: 'Pulse Width (μs)', color: '#4a6080', font: { size: 10 } },
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        // 現在位置の縦線
+        annotation: {}
+      }
+    }
+  });
+}
+
+// ─── シーク ───────────────────────────────────────────────
+function seekTo(ms) {
+  currentMs = Math.max(0, Math.min(totalMs, ms));
+  document.getElementById('timeline').value = currentMs;
+  updateDisplay(currentMs);
+}
+
+function onTimelineInput(val) {
+  seekTo(parseInt(val));
+}
+
+function updateDisplay(ms) {
+  // パルスデータ: ms に最も近いデータ点を探す
+  const pd = findNearest(pulseData, ms, 'timestamp_ms');
+  if (pd) {
+    document.getElementById('statTime').textContent  = ms + 'ms';
+    document.getElementById('statPulse').textContent = pd.pulse_us + 'μs';
+    document.getElementById('statAngle').textContent = pd.angle_deg + '°';
+  }
+
+  // フレーム: ms 以下の最新フレームを探す
+  const fd = findNearestBelow(frameData, ms, 'timestamp_ms');
+  if (fd) {
+    const imgEl = document.getElementById('frameImg');
+    imgEl.src   = `/session/${sessionName}/image/${fd.filename}`;
+    imgEl.style.display = 'block';
+    document.getElementById('noImage').style.display = 'none';
+    document.getElementById('frameIndex').textContent = `Frame: ${fd.frame_index + 1}`;
+    document.getElementById('frameTime').textContent  = `${fd.timestamp_ms}ms`;
+    document.getElementById('statFrame').textContent  = `${fd.frame_index + 1} / ${frameData.length}`;
+  } else {
+    document.getElementById('noImage').style.display = 'block';
+    document.getElementById('frameImg').style.display = 'none';
+    document.getElementById('statFrame').textContent = '— / ' + frameData.length;
+  }
+
+  // グラフの現在位置マーカーを更新
+  updateChartMarker(ms);
+}
+
+function findNearest(arr, ms, key) {
+  if (!arr.length) return null;
+  let best = arr[0], bestDiff = Math.abs(arr[0][key] - ms);
+  for (const d of arr) {
+    const diff = Math.abs(d[key] - ms);
+    if (diff < bestDiff) { best = d; bestDiff = diff; }
+  }
+  return best;
+}
+
+function findNearestBelow(arr, ms, key) {
+  let result = null;
+  for (const d of arr) {
+    if (d[key] <= ms) result = d;
+    else break;
+  }
+  return result;
+}
+
+// ─── グラフマーカー ──────────────────────────────────────
+function updateChartMarker(ms) {
+  if (!chart) return;
+  // 現在位置に最も近いインデックスを計算
+  const idx = pulseData.findIndex(d => d.timestamp_ms >= ms);
+  if (idx < 0) return;
+
+  // データセット2本目をマーカーとして使用
+  if (chart.data.datasets.length < 2) {
+    chart.data.datasets.push({
+      label: 'Current',
+      data: [],
+      borderColor: '#ff6b35',
+      borderWidth: 2,
+      pointRadius: 6,
+      pointBackgroundColor: '#ff6b35',
+      showLine: false,
+    });
+  }
+  chart.data.datasets[1].data = [{
+    x: pulseData[idx].timestamp_ms,
+    y: pulseData[idx].pulse_us,
+  }];
+  chart.update('none');
+}
+
+// ─── 再生 ─────────────────────────────────────────────────
+function togglePlay() {
+  if (isPlaying) {
+    pausePlay();
+  } else {
+    startPlay();
+  }
+}
+
+function startPlay() {
+  if (currentMs >= totalMs) seekTo(0);
+  isPlaying = true;
+  document.getElementById('playBtn').textContent = '⏸ Pause';
+  document.getElementById('playBtn').classList.add('playing');
+
+  const speed    = parseFloat(document.getElementById('speedSelect').value);
+  const interval = 100;  // 100ms ごとに更新
+  const step     = interval * speed;
+
+  playTimer = setInterval(() => {
+    currentMs += step;
+    if (currentMs >= totalMs) {
+      currentMs = totalMs;
+      updateDisplay(currentMs);
+      pausePlay();
+      return;
+    }
+    document.getElementById('timeline').value = currentMs;
+    updateDisplay(currentMs);
+  }, interval);
+}
+
+function pausePlay() {
+  isPlaying = false;
+  clearInterval(playTimer);
+  document.getElementById('playBtn').textContent = '▶ Play';
+  document.getElementById('playBtn').classList.remove('playing');
+}
+
+// ─── 初期化 ───────────────────────────────────────────────
+loadSessionList();
+</script>
+</body>
+</html>
